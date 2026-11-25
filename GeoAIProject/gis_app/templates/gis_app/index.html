@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Геоинтеллектуальный сервис</title>
+    <!-- Подключаем Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .ai-panel {
+            background: #f4f4f9;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        #ai-response {
+            white-space: pre-wrap;
+            margin-top: 15px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Геоинтеллектуальный веб-сервис</h1>
+
+    <!-- Карта -->
+    <div id="map"></div>
+
+    <!-- Панель ИИ -->
+    <div class="ai-panel">
+        <h3>Задайте вопрос по объектам на карте:</h3>
+        <input type="text" id="user-question" placeholder="Например: Сколько школ в радиусе 1 км?" style="width: 70%; padding: 8px;">
+        <button onclick="askAI()" style="padding: 8px 15px;">Спросить ИИ</button>
+        <div id="ai-response">Здесь появится ответ...</div>
+    </div>
+
+    <script>
+        // 1. Инициализация карты (центр на Москве)
+        var map = L.map('map').setView([55.7558, 37.6173], 13);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19,
+            referrerPolicy: 'strict-origin-when-cross-origin' // Принудительно отправляем Referer
+        }).addTo(map);
+
+        var allObjects = []; // Сюда сохраним данные
+
+        // 2. Загрузка данных и добавление маркеров
+        // Замените URL на путь к вашему Django-серверу (см. Шаг 4)
+        fetch('/api/get-data/')
+            .then(response => response.json())
+            .then(data => {
+                allObjects = data;
+                data.forEach(obj => {
+                    // Разные цвета для разных типов
+                    let color = obj.type === 'school' ? 'blue' : obj.type === 'hospital' ? 'red' : obj.type === 'park' ? 'green' : 'orange';
+
+                    // Создаем круглый маркер нужного цвета
+                    let marker = L.circleMarker([obj.lat, obj.lng], {
+                        color: color, radius: 8, fillOpacity: 0.8
+                    }).addTo(map);
+
+                    // Popup с атрибутами
+                    marker.bindPopup(`<b>${obj.name}</b><br>Тип: ${obj.type}<br>Адрес: ${obj.address}<br>${obj.description}`);
+                });
+            });
+
+        // 3. Функция отправки вопроса ИИ
+        function askAI() {
+            const question = document.getElementById('user-question').value;
+            if (!question.trim()) {
+                alert("Введите вопрос!");
+                return;
+            }
+
+            document.getElementById('ai-response').innerText = "ИИ думает...";
+
+            // Формируем контекст (только те объекты, что сейчас видны на карте)
+            const bounds = map.getBounds();
+            const visibleObjects = allObjects.filter(obj => bounds.contains([obj.lat, obj.lng]));
+
+            // Отправляем POST-запрос на Django (прокси)
+            fetch('/api/ask-ai/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') // Для защиты CSRF
+                },
+                body: JSON.stringify({
+                    question: question,
+                    context: visibleObjects
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('ai-response').innerText = data.answer || data.error;
+            })
+            .catch(err => {
+                document.getElementById('ai-response').innerText = "Ошибка сети или сервера.";
+            });
+        }
+
+        // Вспомогательная функция для получения CSRF-токена из cookie
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+</body>
+</html>
